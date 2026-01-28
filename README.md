@@ -4,10 +4,28 @@ A personal security service to store and search leaked database credentials for 
 
 ## Features
 
+- **Password Protected**: Client-side password authentication with SHA-256 hashing
 - **Data Ingestion**: Automatically converts text/CSV files to efficient Parquet format
 - **Fast Search**: DuckDB-powered search for instant email/domain lookups
 - **Web Interface**: Browser-based search with terminal-style UI
 - **Automated Processing**: GitHub Actions workflow for batch processing
+
+## Password Protection
+
+The site is password-protected with client-side authentication.
+
+**Default Password:** `leakdb2024`
+
+### Changing Your Password
+
+1. Open `generate_password_hash.html` in your browser
+2. Enter your desired password
+3. Click "Generate Hash" and copy the hash
+4. Open `index.html` and find line with `const PASSWORD_HASH = "...";`
+5. Replace the hash with your new hash
+6. Commit and push the changes
+
+**Security Note:** This is client-side protection. While it prevents casual access, determined attackers with technical knowledge could bypass it. For maximum security, keep your repository private.
 
 ## Quick Start
 
