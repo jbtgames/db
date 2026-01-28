@@ -128,6 +128,11 @@
                 await db.instantiate(bundle.mainModule);
                 conn = await db.connect();
 
+                statusEl.textContent = 'Loading leak data...';
+
+                // Load parquet files from server
+                await loadParquetFiles();
+
                 statusEl.textContent = 'Database ready. You can search or browse leaked credentials.';
                 document.getElementById('searchBtn').disabled = false;
                 document.getElementById('browseBtn').disabled = false;
@@ -142,11 +147,26 @@
             }
         }
 
+        async function loadParquetFiles() {
+            // Fetch list of parquet files from GitHub
+            const leakFiles = ['sample_leak.parquet']; // Add more files as needed
+
+            for (const file of leakFiles) {
+                try {
+                    const response = await fetch(`leaks/${file}`);
+                    const buffer = await response.arrayBuffer();
+                    await db.registerFileBuffer(file, new Uint8Array(buffer));
+                } catch (error) {
+                    console.error(`Failed to load ${file}:`, error);
+                }
+            }
+        }
+
         async function updateStats() {
             try {
                 const result = await conn.query(`
                     SELECT COUNT(*) as total
-                    FROM read_parquet('leaks/*.parquet')
+                    FROM parquet_scan(['sample_leak.parquet'])
                 `);
                 const total = result.toArray()[0].total;
                 document.getElementById('stats').textContent =
@@ -176,14 +196,14 @@
                     // Show all with limit
                     sql = `
                         SELECT email, password
-                        FROM read_parquet('leaks/*.parquet')
+                        FROM parquet_scan(['sample_leak.parquet'])
                         LIMIT 100
                     `;
                 } else if (query.includes('@')) {
                     // Search by exact email
                     sql = `
                         SELECT email, password
-                        FROM read_parquet('leaks/*.parquet')
+                        FROM parquet_scan(['sample_leak.parquet'])
                         WHERE email ILIKE '%${query.replace(/'/g, "''")}%'
                         LIMIT 100
                     `;
@@ -191,7 +211,7 @@
                     // Search by domain
                     sql = `
                         SELECT email, password
-                        FROM read_parquet('leaks/*.parquet')
+                        FROM parquet_scan(['sample_leak.parquet'])
                         WHERE email ILIKE '%@%${query.replace(/'/g, "''")}%'
                         LIMIT 100
                     `;
