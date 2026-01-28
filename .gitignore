@@ -1,0 +1,15 @@
+# Incoming data files (before processing)
+incoming/*.txt
+incoming/*.csv
+
+# Optional: uncomment to ignore processed parquet files too
+# leaks/*.parquet
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/

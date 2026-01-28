@@ -4,20 +4,260 @@
     <title>Private Leak Index</title>
     <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-wasm-browser.js"></script>
     <style>
-        body { background: #1a1a1a; color: #00ff00; font-family: monospace; padding: 20px; }
-        input { background: #333; border: 1px solid #00ff00; color: #00ff00; padding: 10px; width: 300px; }
-        .result { border-bottom: 1px solid #333; padding: 10px 0; }
+        body {
+            background: #0a0a0a;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            border-bottom: 2px solid #00ff00;
+            padding-bottom: 10px;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        input {
+            background: #1a1a1a;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 10px;
+            flex: 1;
+            min-width: 300px;
+            font-family: inherit;
+        }
+        input:focus {
+            outline: none;
+            box-shadow: 0 0 5px #00ff00;
+        }
+        button {
+            background: #1a1a1a;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        button:hover {
+            background: #00ff00;
+            color: #0a0a0a;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #status {
+            color: #ffff00;
+            margin: 10px 0;
+            min-height: 24px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #333;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background: #1a1a1a;
+            color: #00ff00;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+        tr:hover {
+            background: #1a1a1a;
+        }
+        .stats {
+            color: #888;
+            font-size: 0.9em;
+            margin: 10px 0;
+        }
+        .password {
+            font-family: monospace;
+            color: #ff6600;
+        }
+        .error {
+            color: #ff0000;
+            border: 1px solid #ff0000;
+            padding: 10px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
     <h1>[ PRIVATE LEAK SEARCH ]</h1>
-    <input type="text" id="query" placeholder="Enter email or domain...">
+
+    <div class="controls">
+        <input type="text" id="query" placeholder="Search email or domain (or leave empty to show all)...">
+        <button id="searchBtn" onclick="search()">Search</button>
+        <button id="browseBtn" onclick="browseAll()">Browse All</button>
+        <button id="clearBtn" onclick="clearResults()">Clear</button>
+    </div>
+
+    <div id="status">Initializing database...</div>
+    <div class="stats" id="stats"></div>
     <div id="results"></div>
 
     <script type="module">
-        // Logic to load DuckDB-Wasm and query /leaks/*.parquet goes here.
-        // For a private repo, you must serve this locally or use a PAT token in the URL.
-        console.log("Ready for search.");
+        let db = null;
+        let conn = null;
+
+        async function initDB() {
+            try {
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = 'Loading DuckDB...';
+
+                // Initialize DuckDB
+                const DUCKDB_CONFIG = await duckdb.selectBundle({
+                    mvp: {
+                        mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-mvp.wasm',
+                        mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-mvp.worker.js',
+                    },
+                    eh: {
+                        mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-eh.wasm',
+                        mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-eh.worker.js',
+                    },
+                });
+
+                const logger = new duckdb.ConsoleLogger();
+                const worker = new Worker(DUCKDB_CONFIG.mainWorker);
+                db = new duckdb.AsyncDuckDB(logger, worker);
+                await db.instantiate(DUCKDB_CONFIG.mainModule);
+                conn = await db.connect();
+
+                statusEl.textContent = 'Database ready. You can search or browse leaked credentials.';
+                document.getElementById('searchBtn').disabled = false;
+                document.getElementById('browseBtn').disabled = false;
+
+                // Try to get initial stats
+                await updateStats();
+
+            } catch (error) {
+                console.error('Error initializing database:', error);
+                document.getElementById('status').innerHTML =
+                    `<span class="error">Error: ${error.message}</span>`;
+            }
+        }
+
+        async function updateStats() {
+            try {
+                const result = await conn.query(`
+                    SELECT COUNT(*) as total
+                    FROM read_parquet('leaks/*.parquet')
+                `);
+                const total = result.toArray()[0].total;
+                document.getElementById('stats').textContent =
+                    `Total records in database: ${total.toLocaleString()}`;
+            } catch (error) {
+                // Database might be empty, that's ok
+                console.log('No data yet:', error);
+            }
+        }
+
+        window.search = async function() {
+            const query = document.getElementById('query').value.trim();
+            const statusEl = document.getElementById('status');
+            const resultsEl = document.getElementById('results');
+
+            if (!conn) {
+                statusEl.innerHTML = '<span class="error">Database not initialized</span>';
+                return;
+            }
+
+            try {
+                statusEl.textContent = 'Searching...';
+                resultsEl.innerHTML = '';
+
+                let sql;
+                if (query === '') {
+                    // Show all with limit
+                    sql = `
+                        SELECT email, password
+                        FROM read_parquet('leaks/*.parquet')
+                        LIMIT 100
+                    `;
+                } else if (query.includes('@')) {
+                    // Search by exact email
+                    sql = `
+                        SELECT email, password
+                        FROM read_parquet('leaks/*.parquet')
+                        WHERE email ILIKE '%${query.replace(/'/g, "''")}%'
+                        LIMIT 100
+                    `;
+                } else {
+                    // Search by domain
+                    sql = `
+                        SELECT email, password
+                        FROM read_parquet('leaks/*.parquet')
+                        WHERE email ILIKE '%@%${query.replace(/'/g, "''")}%'
+                        LIMIT 100
+                    `;
+                }
+
+                const result = await conn.query(sql);
+                const rows = result.toArray();
+
+                if (rows.length === 0) {
+                    statusEl.textContent = 'No results found.';
+                    resultsEl.innerHTML = '<p>No matching records.</p>';
+                    return;
+                }
+
+                statusEl.textContent = `Found ${rows.length} result(s) ${rows.length === 100 ? '(limited to 100)' : ''}`;
+
+                // Create table
+                let html = '<table><thead><tr><th>Email</th><th>Password</th></tr></thead><tbody>';
+                rows.forEach(row => {
+                    html += `<tr>
+                        <td>${escapeHtml(row.email)}</td>
+                        <td class="password">${escapeHtml(row.password)}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                resultsEl.innerHTML = html;
+
+            } catch (error) {
+                console.error('Search error:', error);
+                statusEl.innerHTML = `<span class="error">Error: ${error.message}</span>`;
+            }
+        };
+
+        window.browseAll = async function() {
+            document.getElementById('query').value = '';
+            await search();
+        };
+
+        window.clearResults = function() {
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('query').value = '';
+            document.getElementById('status').textContent = 'Results cleared.';
+        };
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Allow search on Enter key
+        document.getElementById('query').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                search();
+            }
+        });
+
+        // Initialize on page load
+        initDB();
     </script>
-</body> 
+</body>
 </html>
