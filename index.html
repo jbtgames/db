@@ -2,6 +2,25 @@
 <html>
 <head>
     <title>Private Leak Index</title>
+    <script type="module">
+        // Firebase configuration - REPLACE WITH YOUR OWN CONFIG
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+
+        // TODO: Replace with your Firebase project configuration
+        // Get this from Firebase Console > Project Settings > General > Your apps > Web app
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY_HERE",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        window.firebaseApp = initializeApp(firebaseConfig);
+        window.firebaseAuth = getAuth(window.firebaseApp);
+    </script>
     <style>
         body {
             background: #0a0a0a;
@@ -101,15 +120,18 @@
         <button id="searchBtn" onclick="search()">Search</button>
         <button id="browseBtn" onclick="browseAll()">Browse All</button>
         <button id="clearBtn" onclick="clearResults()">Clear</button>
+        <button onclick="logout()" style="background: #660000; border-color: #ff0000; color: #ff0000;">Logout</button>
     </div>
 
     <div id="auth-screen" style="display: block;">
         <div style="max-width: 400px; margin: 100px auto; text-align: center;">
             <h2 style="margin-bottom: 20px;">🔒 AUTHENTICATION REQUIRED</h2>
-            <p style="color: #888; margin-bottom: 30px;">Enter password to access leaked database</p>
-            <input type="password" id="auth-password" placeholder="Enter password..." style="width: 100%; margin-bottom: 10px;">
-            <button id="auth-submit" style="width: 100%;">Unlock</button>
-            <div id="auth-error" style="color: #ff0000; margin-top: 10px; display: none;">Invalid password</div>
+            <p style="color: #888; margin-bottom: 30px;">Sign in to access leaked database</p>
+            <input type="email" id="auth-email" placeholder="Email..." style="width: 100%; margin-bottom: 10px;">
+            <input type="password" id="auth-password" placeholder="Password..." style="width: 100%; margin-bottom: 10px;">
+            <button id="auth-submit" style="width: 100%;">Sign In</button>
+            <div id="auth-error" style="color: #ff0000; margin-top: 10px; display: none;"></div>
+            <div id="auth-loading" style="color: #ffff00; margin-top: 10px; display: none;">Authenticating...</div>
         </div>
     </div>
 
@@ -121,50 +143,80 @@
 
     <script type="module">
         import * as duckdb from 'https://esm.sh/@duckdb/duckdb-wasm@1.28.0';
+        import { signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
 
         let db = null;
         let conn = null;
         let authenticated = false;
-
-        // Password hash (SHA-256 of "leakdb2024")
-        // Change this to your own password hash
-        const PASSWORD_HASH = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918";
-
-        async function hashPassword(password) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(password);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        }
+        const auth = window.firebaseAuth;
 
         async function authenticate() {
+            const emailInput = document.getElementById('auth-email');
             const passwordInput = document.getElementById('auth-password');
-            const password = passwordInput.value;
-            const hash = await hashPassword(password);
+            const errorEl = document.getElementById('auth-error');
+            const loadingEl = document.getElementById('auth-loading');
 
-            if (hash === PASSWORD_HASH) {
-                authenticated = true;
-                sessionStorage.setItem('authenticated', 'true');
-                document.getElementById('auth-screen').style.display = 'none';
-                document.getElementById('app-screen').style.display = 'block';
-                document.getElementById('search-controls').style.display = 'flex';
-                await initDB();
-            } else {
-                document.getElementById('auth-error').style.display = 'block';
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!email || !password) {
+                errorEl.textContent = 'Please enter both email and password';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                errorEl.style.display = 'none';
+                loadingEl.style.display = 'block';
+
+                await signInWithEmailAndPassword(auth, email, password);
+                // onAuthStateChanged will handle the UI update
+
+            } catch (error) {
+                loadingEl.style.display = 'none';
+                console.error('Auth error:', error);
+
+                let message = 'Authentication failed';
+                if (error.code === 'auth/invalid-credential') {
+                    message = 'Invalid email or password';
+                } else if (error.code === 'auth/user-not-found') {
+                    message = 'User not found';
+                } else if (error.code === 'auth/wrong-password') {
+                    message = 'Incorrect password';
+                } else if (error.code === 'auth/invalid-email') {
+                    message = 'Invalid email address';
+                } else if (error.code === 'auth/network-request-failed') {
+                    message = 'Network error - check your connection';
+                }
+
+                errorEl.textContent = message;
+                errorEl.style.display = 'block';
                 passwordInput.value = '';
-                passwordInput.focus();
             }
         }
 
-        // Check if already authenticated in this session
-        if (sessionStorage.getItem('authenticated') === 'true') {
-            authenticated = true;
-            document.getElementById('auth-screen').style.display = 'none';
-            document.getElementById('app-screen').style.display = 'block';
-            document.getElementById('search-controls').style.display = 'flex';
-            initDB();
-        }
+        // Monitor authentication state
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                // User is signed in
+                authenticated = true;
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('app-screen').style.display = 'block';
+                document.getElementById('search-controls').style.display = 'flex';
+                document.getElementById('auth-loading').style.display = 'none';
+
+                // Initialize database
+                if (!db) {
+                    await initDB();
+                }
+            } else {
+                // User is signed out
+                authenticated = false;
+                document.getElementById('auth-screen').style.display = 'block';
+                document.getElementById('app-screen').style.display = 'none';
+                document.getElementById('search-controls').style.display = 'none';
+            }
+        });
 
         // Auth event listeners
         document.getElementById('auth-submit').addEventListener('click', authenticate);
@@ -173,6 +225,21 @@
                 authenticate();
             }
         });
+        document.getElementById('auth-email').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('auth-password').focus();
+            }
+        });
+
+        // Add logout functionality
+        window.logout = async function() {
+            try {
+                await signOut(auth);
+                location.reload();
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        };
 
         async function initDB() {
             if (!authenticated) return;

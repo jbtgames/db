@@ -4,28 +4,34 @@ A personal security service to store and search leaked database credentials for 
 
 ## Features
 
-- **Password Protected**: Client-side password authentication with SHA-256 hashing
+- **🔐 Firebase Authentication**: Real server-side authentication (not just client-side)
 - **Data Ingestion**: Automatically converts text/CSV files to efficient Parquet format
 - **Fast Search**: DuckDB-powered search for instant email/domain lookups
 - **Web Interface**: Browser-based search with terminal-style UI
 - **Automated Processing**: GitHub Actions workflow for batch processing
 
-## Password Protection
+## Security & Authentication
 
-The site is password-protected with client-side authentication.
+This site uses **Firebase Authentication** for real server-side security:
 
-**Default Password:** `leakdb2024`
+- ✅ No passwords stored in code
+- ✅ Managed by Google's infrastructure
+- ✅ Add/remove users via Firebase Console
+- ✅ Token-based authentication
+- ✅ Brute-force protection included
 
-### Changing Your Password
+**Setup Required:** You must configure Firebase to use this application.
 
-1. Open `generate_password_hash.html` in your browser
-2. Enter your desired password
-3. Click "Generate Hash" and copy the hash
-4. Open `index.html` and find line with `const PASSWORD_HASH = "...";`
-5. Replace the hash with your new hash
-6. Commit and push the changes
+👉 **[Complete Firebase Setup Guide →](FIREBASE_SETUP.md)**
 
-**Security Note:** This is client-side protection. While it prevents casual access, determined attackers with technical knowledge could bypass it. For maximum security, keep your repository private.
+**Quick Summary:**
+1. Create free Firebase project
+2. Enable Email/Password authentication
+3. Add authorized users (email + password)
+4. Copy Firebase config to `index.html`
+5. Deploy and sign in with your credentials
+
+**No Firebase setup yet?** The site will show authentication errors until you complete the Firebase configuration.
 
 ## Quick Start
 
