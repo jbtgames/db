@@ -19,7 +19,11 @@ jobs:
         run: |
           git config --global user.name "Leak-Bot"
           git config --global user.email "bot@github.com"
-          git add leaks/*.parquet
-          git rm incoming/*.txt || true
-          git commit -m "Auto-processed new leak data"
-          git push
+          git add leaks/*.parquet 2>/dev/null || true
+          git rm incoming/*.txt 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-processed new leak data"
+            git push
+          fi
