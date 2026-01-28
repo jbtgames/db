@@ -108,7 +108,7 @@
     <div id="results"></div>
 
     <script type="module">
-        import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
+        import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-esm.js';
 
         let db = null;
         let conn = null;
@@ -118,22 +118,14 @@
                 const statusEl = document.getElementById('status');
                 statusEl.textContent = 'Loading DuckDB...';
 
-                // Initialize DuckDB
-                const DUCKDB_CONFIG = await duckdb.selectBundle({
-                    mvp: {
-                        mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-mvp.wasm',
-                        mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-mvp.worker.js',
-                    },
-                    eh: {
-                        mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-eh.wasm',
-                        mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-eh.worker.js',
-                    },
-                });
+                // Initialize DuckDB with jsdelivr CDN bundle
+                const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+                const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
 
                 const logger = new duckdb.ConsoleLogger();
-                const worker = new Worker(DUCKDB_CONFIG.mainWorker);
+                const worker = await duckdb.createWorker(bundle.mainWorker);
                 db = new duckdb.AsyncDuckDB(logger, worker);
-                await db.instantiate(DUCKDB_CONFIG.mainModule);
+                await db.instantiate(bundle.mainModule);
                 conn = await db.connect();
 
                 statusEl.textContent = 'Database ready. You can search or browse leaked credentials.';
