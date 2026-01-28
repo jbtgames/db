@@ -120,7 +120,9 @@
         <button id="searchBtn" onclick="search()">Search</button>
         <button id="browseBtn" onclick="browseAll()">Browse All</button>
         <button id="clearBtn" onclick="clearResults()">Clear</button>
+        <button onclick="document.getElementById('file-upload').click()" style="background: #1a4d1a; border-color: #00ff00;">📁 Upload</button>
         <button onclick="logout()" style="background: #660000; border-color: #ff0000; color: #ff0000;">Logout</button>
+        <input type="file" id="file-upload" accept=".txt,.csv" style="display: none;" onchange="handleFileUpload(event)">
     </div>
 
     <div id="auth-screen" style="display: block;">
@@ -148,6 +150,7 @@
         let db = null;
         let conn = null;
         let authenticated = false;
+        let loadedFiles = []; // Track all loaded parquet files
         const auth = window.firebaseAuth;
 
         async function authenticate() {
@@ -285,6 +288,7 @@
                     const response = await fetch(`leaks/${file}`);
                     const buffer = await response.arrayBuffer();
                     await db.registerFileBuffer(file, new Uint8Array(buffer));
+                    loadedFiles.push(file);
                 } catch (error) {
                     console.error(`Failed to load ${file}:`, error);
                 }
@@ -293,13 +297,26 @@
 
         async function updateStats() {
             try {
-                const result = await conn.query(`
-                    SELECT COUNT(*) as total
-                    FROM parquet_scan(['sample_leak.parquet'])
-                `);
+                if (loadedFiles.length === 0) {
+                    document.getElementById('stats').textContent = 'No data loaded yet';
+                    return;
+                }
+
+                // Build UNION query for all loaded files/tables
+                const queries = loadedFiles.map(file => {
+                    if (file.startsWith('uploaded_')) {
+                        return `SELECT COUNT(*) as count FROM ${file}`;
+                    } else {
+                        return `SELECT COUNT(*) as count FROM parquet_scan(['${file}'])`;
+                    }
+                });
+
+                const unionQuery = queries.join(' UNION ALL ');
+                const result = await conn.query(`SELECT SUM(count) as total FROM (${unionQuery})`);
                 const total = result.toArray()[0].total;
+
                 document.getElementById('stats').textContent =
-                    `Total records in database: ${total.toLocaleString()}`;
+                    `Total records in database: ${total.toLocaleString()} (${loadedFiles.length} source${loadedFiles.length > 1 ? 's' : ''})`;
             } catch (error) {
                 // Database might be empty, that's ok
                 console.log('No data yet:', error);
@@ -316,35 +333,40 @@
                 return;
             }
 
+            if (loadedFiles.length === 0) {
+                statusEl.innerHTML = '<span class="error">No data loaded. Upload a file or wait for data to load.</span>';
+                return;
+            }
+
             try {
                 statusEl.textContent = 'Searching...';
                 resultsEl.innerHTML = '';
 
-                let sql;
-                if (query === '') {
-                    // Show all with limit
-                    sql = `
-                        SELECT email, password
-                        FROM parquet_scan(['sample_leak.parquet'])
-                        LIMIT 100
-                    `;
-                } else if (query.includes('@')) {
-                    // Search by exact email
-                    sql = `
-                        SELECT email, password
-                        FROM parquet_scan(['sample_leak.parquet'])
-                        WHERE email ILIKE '%${query.replace(/'/g, "''")}%'
-                        LIMIT 100
-                    `;
-                } else {
-                    // Search by domain
-                    sql = `
-                        SELECT email, password
-                        FROM parquet_scan(['sample_leak.parquet'])
-                        WHERE email ILIKE '%@%${query.replace(/'/g, "''")}%'
-                        LIMIT 100
-                    `;
-                }
+                // Build UNION query for all loaded files/tables
+                const queries = loadedFiles.map(file => {
+                    let baseQuery;
+                    if (file.startsWith('uploaded_')) {
+                        baseQuery = `SELECT email, password FROM ${file}`;
+                    } else {
+                        baseQuery = `SELECT email, password FROM parquet_scan(['${file}'])`;
+                    }
+
+                    // Add WHERE clause if searching
+                    if (query !== '') {
+                        if (query.includes('@')) {
+                            // Search by exact email
+                            baseQuery += ` WHERE email ILIKE '%${query.replace(/'/g, "''")}%'`;
+                        } else {
+                            // Search by domain
+                            baseQuery += ` WHERE email ILIKE '%@%${query.replace(/'/g, "''")}%'`;
+                        }
+                    }
+
+                    return baseQuery;
+                });
+
+                const unionQuery = queries.join(' UNION ALL ');
+                const sql = `SELECT * FROM (${unionQuery}) LIMIT 100`;
 
                 const result = await conn.query(sql);
                 const rows = result.toArray();
@@ -383,6 +405,67 @@
             document.getElementById('results').innerHTML = '';
             document.getElementById('query').value = '';
             document.getElementById('status').textContent = 'Results cleared.';
+        };
+
+        window.handleFileUpload = async function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Uploading ${file.name}...`;
+
+            try {
+                // Read file content
+                const text = await file.text();
+                const lines = text.split('\n').filter(line => line.trim());
+
+                if (lines.length === 0) {
+                    statusEl.innerHTML = '<span class="error">File is empty</span>';
+                    return;
+                }
+
+                // Parse lines (email:password or email,password)
+                const delimiter = text.includes(':') ? ':' : ',';
+                const data = lines.map(line => {
+                    const parts = line.trim().split(delimiter);
+                    return {
+                        email: parts[0]?.trim() || '',
+                        password: parts[1]?.trim() || ''
+                    };
+                }).filter(row => row.email && row.password);
+
+                if (data.length === 0) {
+                    statusEl.innerHTML = '<span class="error">No valid email:password pairs found</span>';
+                    return;
+                }
+
+                statusEl.textContent = `Processing ${data.length} records...`;
+
+                // Create table in DuckDB from uploaded data
+                const fileName = file.name.replace(/\.(txt|csv)$/, '');
+                const tableName = `uploaded_${fileName.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+
+                // Insert data into a new table
+                await conn.query(`CREATE TABLE IF NOT EXISTS ${tableName} (email VARCHAR, password VARCHAR)`);
+
+                // Batch insert data
+                for (const row of data) {
+                    await conn.query(`INSERT INTO ${tableName} VALUES ('${row.email.replace(/'/g, "''")}', '${row.password.replace(/'/g, "''")}')`);
+                }
+
+                // Track this as a loaded "file"
+                loadedFiles.push(tableName);
+
+                statusEl.textContent = `✓ Uploaded ${file.name} (${data.length} records)`;
+                await updateStats();
+
+                // Clear the file input so the same file can be re-uploaded
+                event.target.value = '';
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                statusEl.innerHTML = `<span class="error">Upload failed: ${error.message}</span>`;
+            }
         };
 
         function escapeHtml(text) {
