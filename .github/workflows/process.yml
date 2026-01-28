@@ -1,0 +1,25 @@
+name: Data Ingest Bot
+on:
+  push:
+    paths:
+      - 'incoming/**'
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with: { python-version: '3.10' }
+      - name: Install Dependencies
+        run: pip install duckdb
+      - name: Run Ingestor
+        run: python scripts/ingest.py
+      - name: Commit Changes
+        run: |
+          git config --global user.name "Leak-Bot"
+          git config --global user.email "bot@github.com"
+          git add leaks/*.parquet
+          git rm incoming/*.txt || true
+          git commit -m "Auto-processed new leak data"
+          git push
