@@ -31,6 +31,7 @@ python scripts/ingest.py
 
 This will:
 - Parse the text files
+- Hash all passwords using SHA256 (raw credentials are never stored)
 - Convert to Parquet format with compression
 - Store in `leaks/` directory
 - Remove processed files from `incoming/`
@@ -48,6 +49,7 @@ Then visit `http://localhost:8000` and:
 - **Search by email**: Enter full or partial email address
 - **Search by domain**: Enter domain name (e.g., "gmail.com")
 - **Browse all**: Click "Browse All" to see first 100 records
+- **Hash verification**: Passwords are stored as SHA256 hashes for security verification
 
 ## File Structure
 
@@ -89,7 +91,8 @@ The workflow automatically:
 - **Private use only**: This is for personal security monitoring
 - **Keep private**: Ensure repository remains private
 - **Local hosting**: Use local HTTP server, not public hosting
-- **Data privacy**: Leaked credentials should never be shared
+- **Data privacy**: Leaked credentials' passwords are hashed using SHA256 before storage; raw credentials are never persisted
+- **Hash verification**: Use hashes to verify compromised accounts without exposing raw passwords
 
 ## Technologies
 

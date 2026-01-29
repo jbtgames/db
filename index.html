@@ -82,6 +82,12 @@
             font-size: 0.9em;
             margin: 10px 0;
         }
+        .info {
+            color: #888;
+            font-size: 0.85em;
+            margin: 10px 0;
+            font-style: italic;
+        }
         .password {
             font-family: monospace;
             color: #ff6600;
@@ -106,6 +112,7 @@
 
     <div id="status">Initializing database...</div>
     <div class="stats" id="stats"></div>
+    <div class="info" id="info">Password hashes are shown for verification purposes (SHA256)</div>
     <div id="results"></div>
 
     <script type="module">
@@ -182,14 +189,14 @@
                 if (query === '') {
                     // Show all with limit
                     sql = `
-                        SELECT email, password
+                        SELECT email, password_hash
                         FROM read_parquet('leaks/*.parquet')
                         LIMIT 100
                     `;
                 } else if (query.includes('@')) {
                     // Search by exact email
                     sql = `
-                        SELECT email, password
+                        SELECT email, password_hash
                         FROM read_parquet('leaks/*.parquet')
                         WHERE email ILIKE '%${query.replace(/'/g, "''")}%'
                         LIMIT 100
@@ -197,7 +204,7 @@
                 } else {
                     // Search by domain
                     sql = `
-                        SELECT email, password
+                        SELECT email, password_hash
                         FROM read_parquet('leaks/*.parquet')
                         WHERE email ILIKE '%@%${query.replace(/'/g, "''")}%'
                         LIMIT 100
@@ -216,11 +223,11 @@
                 statusEl.textContent = `Found ${rows.length} result(s) ${rows.length === 100 ? '(limited to 100)' : ''}`;
 
                 // Create table
-                let html = '<table><thead><tr><th>Email</th><th>Password</th></tr></thead><tbody>';
+                let html = '<table><thead><tr><th>Email</th><th>Password Hash (SHA256)</th></tr></thead><tbody>';
                 rows.forEach(row => {
                     html += `<tr>
                         <td>${escapeHtml(row.email)}</td>
-                        <td class="password">${escapeHtml(row.password)}</td>
+                        <td class="password">${escapeHtml(row.password_hash)}</td>
                     </tr>`;
                 });
                 html += '</tbody></table>';
